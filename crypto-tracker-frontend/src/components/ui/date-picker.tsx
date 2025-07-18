@@ -35,7 +35,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, label }
             <CalendarIcon className="ml-2 h-4 w-4 opacity-50" />
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-2">
+        <PopoverContent className="w-auto p-2 z-100 bg-white">
           <input
             type="datetime-local"
             value={value}

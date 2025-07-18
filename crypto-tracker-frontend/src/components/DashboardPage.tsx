@@ -17,6 +17,8 @@ import {
   CategoryScale,
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
+import type { ChartData, ChartOptions } from 'chart.js';
+import type { CurrentCrypto, HistoricalCrypto, AverageCrypto } from '../types/crypto';
 
 ChartJS.register(
   LineElement,
@@ -37,19 +39,148 @@ const columns = [
   { key: 'change24h', label: '24h Change (%)' },
 ];
 
-const historyRanges = [
+// Explicitly type historyRanges
+const historyRanges: { label: string; value: string }[] = [
   { label: '1 Day', value: '1d' },
   { label: '3 Days', value: '3d' },
   { label: '7 Days', value: '7d' },
   { label: '30 Days', value: '30d' },
 ];
 
+// Utility type guard for API data
+function extractArray<T>(data: T[] | { data: T[] } | undefined): T[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if ('data' in data && Array.isArray(data.data)) return data.data;
+  return [];
+}
+
+function SelectedCoinDetails({
+  selectedCoin,
+  historyRange,
+  setHistoryRange,
+  refetchHistory,
+  isLoadingHistory,
+  isErrorHistory,
+  errorHistory,
+  coinHistory,
+  chartData,
+  chartOptions,
+  historyRanges,
+}: {
+  selectedCoin: CurrentCrypto | HistoricalCrypto | AverageCrypto;
+  historyRange: string;
+  setHistoryRange: (v: string) => void;
+  refetchHistory: () => void;
+  isLoadingHistory: boolean;
+  isErrorHistory: boolean;
+  errorHistory: unknown;
+  coinHistory: HistoricalCrypto[] | { data: HistoricalCrypto[] } | undefined;
+  chartData: ChartData<'line'>;
+  chartOptions: ChartOptions<'line'>;
+  historyRanges: { label: string; value: string }[];
+}) {
+  const symbol =
+    'symbol' in selectedCoin && selectedCoin.symbol
+      ? selectedCoin.symbol
+      : '_id' in selectedCoin && selectedCoin._id
+      ? selectedCoin._id
+      : '';
+  const name = 'name' in selectedCoin ? selectedCoin.name : '';
+  // Use local variable for Line key
+  const chartKey = symbol + '-' + historyRange;
+  return (
+    <div className="flex-1 min-w-0 bg-background rounded-lg shadow p-4">
+      <div className="flex items-center gap-3 mb-2">
+        <CoinIcon symbol={symbol} />
+        <span className="text-xl font-bold">
+          {name} {symbol ? `(${symbol.toUpperCase()})` : ''}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-4 text-lg mb-4">
+        <div>
+          Current Price:{' '}
+          <span className="font-semibold">
+            {'price' in selectedCoin && typeof selectedCoin.price === 'number'
+              ? `$${selectedCoin.price.toLocaleString?.() ?? selectedCoin.price}`
+              : ''}
+          </span>
+        </div>
+        <div>
+          Market Cap:{' '}
+          <span className="font-semibold">
+            {'marketCap' in selectedCoin && typeof selectedCoin.marketCap === 'number'
+              ? `$${selectedCoin.marketCap.toLocaleString?.() ?? selectedCoin.marketCap}`
+              : ''}
+          </span>
+        </div>
+        <div>
+          24h Change:{' '}
+          <span
+            className={
+              'change24h' in selectedCoin && typeof selectedCoin.change24h === 'number'
+                ? selectedCoin.change24h > 0
+                  ? 'text-green-600'
+                  : selectedCoin.change24h < 0
+                  ? 'text-red-600'
+                  : ''
+                : ''
+            }
+          >
+            {'change24h' in selectedCoin && typeof selectedCoin.change24h === 'number'
+              ? `${selectedCoin.change24h.toFixed?.(2) ?? selectedCoin.change24h}%`
+              : ''}
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 mb-4">
+        <span className="font-medium mb-1">History Range:</span>
+        <div className="flex gap-2">
+          {historyRanges.map((r) => (
+            <button
+              key={r.value}
+              className={`px-3 py-1 rounded ${
+                historyRange === r.value
+                  ? 'bg-primary text-primary-foreground font-semibold shadow'
+                  : 'bg-muted text-muted-foreground'
+              } transition`}
+              onClick={() => {
+                setHistoryRange(String(r.value));
+                refetchHistory();
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="bg-background rounded-lg shadow p-2">
+        {isLoadingHistory ? (
+          <TableSkeleton />
+        ) : isErrorHistory ? (
+          <ErrorFallback error={errorHistory as Error} />
+        ) : coinHistory && extractArray<HistoricalCrypto>(coinHistory).length > 0 ? (
+          <Line
+            key={chartKey}
+            data={chartData as ChartData<'line'>}
+            options={chartOptions as ChartOptions<'line'>}
+          />
+        ) : (
+          <EmptyState message="No history data for this coin" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 const DashboardPage: React.FC = () => {
   const [tab, setTab] = useState<'current' | 'average'>('current');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [dateRangeTouched, setDateRangeTouched] = useState(false);
-  const [selectedCoin, setSelectedCoin] = useState<any | null>(null);
+  const [selectedCoin, setSelectedCoin] = useState<
+    CurrentCrypto | HistoricalCrypto | AverageCrypto | null
+  >(null);
   const [historyRange, setHistoryRange] = useState('7d');
 
   const {
@@ -57,7 +188,7 @@ const DashboardPage: React.FC = () => {
     isLoading: isLoadingCurrent,
     isError: isErrorCurrent,
     error: errorCurrent,
-  } = useQuery({
+  } = useQuery<{ data: CurrentCrypto[] } | CurrentCrypto[]>({
     queryKey: ['current-crypto'],
     queryFn: fetchCurrentCrypto,
     enabled: tab === 'current',
@@ -65,8 +196,9 @@ const DashboardPage: React.FC = () => {
 
   // Auto-select the first coin when data loads or tab changes
   useEffect(() => {
-    if (tab === 'current' && currentData && Array.isArray(currentData) && currentData.length > 0) {
-      setSelectedCoin(currentData[0]);
+    if (tab === 'current' && currentData) {
+      const arr = extractArray<CurrentCrypto>(currentData);
+      if (arr.length > 0) setSelectedCoin(arr[0]);
     } else if (tab !== 'current') {
       setSelectedCoin(null);
     }
@@ -78,7 +210,7 @@ const DashboardPage: React.FC = () => {
     isError: isErrorAverage,
     error: errorAverage,
     refetch: refetchAverage,
-  } = useQuery({
+  } = useQuery<{ data: AverageCrypto[] } | AverageCrypto[]>({
     queryKey: ['historical-average', start, end],
     queryFn: () => fetchHistoricalAverage(start, end),
     enabled: tab === 'average' && !!start && !!end,
@@ -90,19 +222,18 @@ const DashboardPage: React.FC = () => {
     isError: isErrorHistory,
     error: errorHistory,
     refetch: refetchHistory,
-  } = useQuery({
+  } = useQuery<{ data: HistoricalCrypto[] } | HistoricalCrypto[]>({
     queryKey: ['coin-history', selectedCoin?.symbol, historyRange],
-    queryFn: () => fetchCoinHistory(selectedCoin?.symbol, historyRange),
+    queryFn: () => fetchCoinHistory(selectedCoin?.symbol as string, historyRange),
     enabled: !!selectedCoin,
   });
 
-  // Prepare Chart.js data and options for the selected coin's history
   const chartData = {
-    labels: coinHistory?.map((d: any) => d.timestamp),
+    labels: extractArray<HistoricalCrypto>(coinHistory).map((d) => d.timestamp),
     datasets: [
       {
-        label: selectedCoin?.name + ' Price',
-        data: coinHistory?.map((d: any) => d.price),
+        label: selectedCoin && 'name' in selectedCoin ? selectedCoin.name + ' Price' : 'Price',
+        data: extractArray<HistoricalCrypto>(coinHistory).map((d) => d.price),
         borderColor: '#6366f1',
         backgroundColor: 'rgba(99,102,241,0.1)',
         tension: 0.4,
@@ -120,7 +251,7 @@ const DashboardPage: React.FC = () => {
     },
     scales: {
       x: {
-        type: 'timeseries' as const,
+        type: 'time' as const,
         time: { unit: 'day' as const, tooltipFormat: 'PPpp' },
         title: { display: true, text: 'Date' },
         ticks: { autoSkip: true, maxTicksLimit: 8 },
@@ -143,13 +274,13 @@ const DashboardPage: React.FC = () => {
     setDateRangeTouched(true);
   };
 
-  const handleCoinClick = (coin: any) => {
+  const handleCoinClick = (coin: CurrentCrypto | HistoricalCrypto | AverageCrypto) => {
     setSelectedCoin(coin);
   };
 
   return (
     <div className="w-full min-h-[80vh] flex items-center justify-center bg-background">
-      <div className="max-w-6xl w-full mx-auto p-4 md:p-8 bg-card rounded-2xl shadow-lg">
+      <div className=" w-full mx-auto p-4 md:p-8 bg-card ">
         <Tabs.Root value={tab} onValueChange={handleTabChange} className="w-full">
           <Tabs.List className="flex gap-2 mb-6 bg-muted rounded-lg p-1">
             <Tabs.Trigger
@@ -186,86 +317,27 @@ const DashboardPage: React.FC = () => {
                     <ErrorFallback error={errorCurrent as Error} />
                   ) : (
                     <CryptoTable
-                      data={currentData}
+                      data={extractArray<CurrentCrypto>(currentData)}
                       onCoinClick={handleCoinClick}
-                      selectedCoin={selectedCoin}
+                      selectedCoin={selectedCoin ?? undefined}
                     />
                   )}
                 </div>
               </div>
               {selectedCoin && (
-                <div className="flex-1 min-w-0 bg-background rounded-lg shadow p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <CoinIcon symbol={selectedCoin.symbol} />
-                    <span className="text-xl font-bold">
-                      {selectedCoin.name} ({selectedCoin.symbol?.toUpperCase()})
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-4 text-lg mb-4">
-                    <div>
-                      Current Price:{' '}
-                      <span className="font-semibold">
-                        ${selectedCoin.price?.toLocaleString?.() ?? selectedCoin.price}
-                      </span>
-                    </div>
-                    <div>
-                      Market Cap:{' '}
-                      <span className="font-semibold">
-                        ${selectedCoin.marketCap?.toLocaleString?.() ?? selectedCoin.marketCap}
-                      </span>
-                    </div>
-                    <div>
-                      24h Change:{' '}
-                      <span
-                        className={
-                          selectedCoin.change24h > 0
-                            ? 'text-green-600'
-                            : selectedCoin.change24h < 0
-                            ? 'text-red-600'
-                            : ''
-                        }
-                      >
-                        {selectedCoin.change24h?.toFixed?.(2) ?? selectedCoin.change24h}%
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-2 mb-4">
-                    <span className="font-medium mb-1">History Range:</span>
-                    <div className="flex gap-2">
-                      {historyRanges.map((r) => (
-                        <button
-                          key={r.value}
-                          className={`px-3 py-1 rounded ${
-                            historyRange === r.value
-                              ? 'bg-primary text-primary-foreground font-semibold shadow'
-                              : 'bg-muted text-muted-foreground'
-                          } transition`}
-                          onClick={() => {
-                            setHistoryRange(r.value);
-                            refetchHistory();
-                          }}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="bg-background rounded-lg shadow p-2">
-                    {isLoadingHistory ? (
-                      <TableSkeleton />
-                    ) : isErrorHistory ? (
-                      <ErrorFallback error={errorHistory as Error} />
-                    ) : coinHistory && coinHistory.length > 0 ? (
-                      <Line
-                        key={(selectedCoin?.symbol || '') + '-' + historyRange}
-                        data={chartData}
-                        options={chartOptions}
-                      />
-                    ) : (
-                      <EmptyState message="No history data for this coin" />
-                    )}
-                  </div>
-                </div>
+                <SelectedCoinDetails
+                  selectedCoin={selectedCoin}
+                  historyRange={historyRange}
+                  setHistoryRange={setHistoryRange}
+                  refetchHistory={refetchHistory}
+                  isLoadingHistory={isLoadingHistory}
+                  isErrorHistory={isErrorHistory}
+                  errorHistory={errorHistory}
+                  coinHistory={coinHistory}
+                  chartData={chartData}
+                  chartOptions={chartOptions}
+                  historyRanges={historyRanges}
+                />
               )}
             </div>
           </Tabs.Content>
@@ -291,10 +363,11 @@ const DashboardPage: React.FC = () => {
                 <TableSkeleton />
               ) : isErrorAverage ? (
                 <ErrorFallback error={errorAverage as Error} />
-              ) : dateRangeTouched && (!averageData || averageData.length === 0) ? (
+              ) : dateRangeTouched &&
+                (!averageData || extractArray<AverageCrypto>(averageData).length === 0) ? (
                 <EmptyState message="No data for selected range" />
               ) : (
-                <CryptoTable data={averageData} isAverage />
+                <CryptoTable data={extractArray<AverageCrypto>(averageData)} isAverage />
               )}
             </div>
           </Tabs.Content>
@@ -305,10 +378,10 @@ const DashboardPage: React.FC = () => {
 };
 
 const CryptoTable: React.FC<{
-  data: any[];
+  data: (CurrentCrypto | AverageCrypto | HistoricalCrypto)[];
   isAverage?: boolean;
-  onCoinClick?: (coin: any) => void;
-  selectedCoin?: any;
+  onCoinClick?: (coin: CurrentCrypto | AverageCrypto | HistoricalCrypto) => void;
+  selectedCoin?: CurrentCrypto | AverageCrypto | HistoricalCrypto;
 }> = ({ data, isAverage, onCoinClick, selectedCoin }) => (
   <table className="min-w-full text-sm md:text-base">
     <thead className="sticky top-0 bg-background/95 z-10">
@@ -325,47 +398,89 @@ const CryptoTable: React.FC<{
     </thead>
     <tbody>
       {Array.isArray(data) && data.length > 0 ? (
-        data.map((coin: any) => (
-          <tr
-            key={coin._id || coin.symbol || coin.id}
-            className={`hover:bg-accent/40 transition border-b last:border-0 cursor-pointer ${
-              selectedCoin && (selectedCoin._id === coin._id || selectedCoin.symbol === coin.symbol)
-                ? 'bg-accent/60'
-                : ''
-            }`}
-            onClick={onCoinClick ? () => onCoinClick(coin) : undefined}
-          >
-            <td className="px-4 py-2 font-medium flex items-center gap-2">
-              <CoinIcon symbol={coin.symbol || coin._id} />
-              {coin.name}
-            </td>
-            <td className="px-4 py-2 uppercase">{coin.symbol || coin._id}</td>
-            <td className="px-4 py-2">
-              $
-              {(isAverage ? coin.avgPrice : coin.price)?.toLocaleString?.() ??
-                (isAverage ? coin.avgPrice : coin.price)}
-            </td>
-            <td className="px-4 py-2">
-              $
-              {(isAverage ? coin.avgMarketCap : coin.marketCap)?.toLocaleString?.() ??
-                (isAverage ? coin.avgMarketCap : coin.marketCap)}
-            </td>
-            <td
-              className={
-                'px-4 py-2 ' +
-                ((isAverage ? coin.avgChange24h : coin.change24h) > 0
-                  ? 'text-green-600'
-                  : (isAverage ? coin.avgChange24h : coin.change24h) < 0
-                  ? 'text-red-600'
-                  : '')
-              }
+        data.map((coin) => {
+          // Type guards for each property
+          const symbol =
+            'symbol' in coin && coin.symbol
+              ? coin.symbol
+              : '_id' in coin && coin._id
+              ? coin._id
+              : 'name' in coin && coin.name
+              ? coin.name
+              : '';
+          const price = isAverage
+            ? (coin as AverageCrypto).avgPrice
+            : 'price' in coin && typeof coin.price === 'number'
+            ? coin.price
+            : undefined;
+          const marketCap = isAverage
+            ? (coin as AverageCrypto).avgMarketCap
+            : 'marketCap' in coin && typeof coin.marketCap === 'number'
+            ? coin.marketCap
+            : undefined;
+          const change24h = isAverage
+            ? (coin as AverageCrypto).avgChange24h
+            : 'change24h' in coin && typeof coin.change24h === 'number'
+            ? coin.change24h
+            : undefined;
+          // For row selection, use the same logic as before
+          const isSelected =
+            selectedCoin &&
+            (('symbol' in selectedCoin &&
+              'symbol' in coin &&
+              selectedCoin.symbol &&
+              coin.symbol &&
+              selectedCoin.symbol === coin.symbol) ||
+              ('_id' in selectedCoin &&
+                '_id' in coin &&
+                selectedCoin._id &&
+                coin._id &&
+                selectedCoin._id === coin._id));
+          return (
+            <tr
+              key={symbol}
+              className={`hover:bg-accent/40 transition border-b last:border-0 cursor-pointer ${
+                isSelected ? 'bg-accent/60' : ''
+              }`}
+              onClick={onCoinClick ? () => onCoinClick(coin) : undefined}
             >
-              {(isAverage ? coin.avgChange24h : coin.change24h)?.toFixed?.(2) ??
-                (isAverage ? coin.avgChange24h : coin.change24h)}
-              %
-            </td>
-          </tr>
-        ))
+              {/* Name + Icon */}
+              <td className="px-4 py-2 font-medium flex items-center gap-2">
+                <CoinIcon symbol={symbol} />
+                {'name' in coin ? coin.name : ''}
+              </td>
+              {/* Symbol */}
+              <td className="px-4 py-2 uppercase">{symbol}</td>
+              {/* Price */}
+              <td className="px-4 py-2">
+                ${price !== undefined && price !== null ? price.toLocaleString?.() ?? price : ''}
+              </td>
+              {/* Market Cap */}
+              <td className="px-4 py-2">
+                $
+                {marketCap !== undefined && marketCap !== null
+                  ? marketCap.toLocaleString?.() ?? marketCap
+                  : ''}
+              </td>
+              {/* Change 24h */}
+              <td
+                className={
+                  'px-4 py-2 ' +
+                  (change24h !== undefined && change24h > 0
+                    ? 'text-green-600'
+                    : change24h !== undefined && change24h < 0
+                    ? 'text-red-600'
+                    : '')
+                }
+              >
+                {change24h !== undefined && change24h !== null
+                  ? change24h.toFixed?.(2) ?? change24h
+                  : ''}
+                %
+              </td>
+            </tr>
+          );
+        })
       ) : (
         <tr>
           <td colSpan={columns.length} className="text-center py-6 text-muted-foreground">
