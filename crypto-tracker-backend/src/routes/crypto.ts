@@ -32,7 +32,19 @@ const HistoricalZod = z
 
 router.get('/current', async (req, res, next) => {
   try {
-    const data = await getCurrentCrypto();
+    const {
+      search = '',
+      sortKey = 'marketCap',
+      sortDir = 'desc',
+      filterChange = 'all',
+    } = req.query;
+    const data = await getCurrentCrypto({
+      search: String(search),
+      sortKey: String(sortKey),
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      filterChange:
+        filterChange === 'positive' || filterChange === 'negative' ? filterChange : 'all',
+    });
     const parsed = z.array(CryptoZod).safeParse(data);
     if (!parsed.success) return res.status(500).json({ error: 'Invalid data format' });
     res.json(parsed.data);

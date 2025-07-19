@@ -7,7 +7,7 @@ import {
 
 export function startCryptoSyncJob(): void {
   // Runs every hour
-  cron.schedule('* * * * *', async () => {
+  cron.schedule('0 * * * *', async () => {
     try {
       console.log(`[CRON] Syncing crypto data at ${new Date().toISOString()}`);
       const coins = await fetchTop10Coins();

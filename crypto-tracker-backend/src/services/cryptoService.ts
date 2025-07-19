@@ -1,6 +1,8 @@
 import axios from 'axios';
 import CurrentCrypto from '../models/CurrentCrypto';
 import HistoricalCrypto from '../models/HistoricalCrypto';
+import type { FilterQuery, SortOrder } from 'mongoose';
+import type { Document } from 'mongoose';
 
 const COINGECKO_API_URL =
   process.env.COINGECKO_API_URL || 'https://api.coingecko.com/api/v3/coins/markets';
@@ -52,12 +54,45 @@ export async function appendHistoricalCrypto(coins: Coin[]): Promise<void> {
   );
 }
 
-export async function getCurrentCrypto() {
-  const result = await CurrentCrypto.find({}).sort({ marketCap: -1 });
+type CurrentCryptoDocument = Document & {
+  name: string;
+  symbol: string;
+  price: number;
+  marketCap: number;
+  change24h: number;
+  updatedAt: Date;
+};
+
+export async function getCurrentCrypto({
+  search = '',
+  sortKey = 'marketCap',
+  sortDir = 'desc',
+  filterChange = 'all',
+}: {
+  search?: string;
+  sortKey?: string;
+  sortDir?: 'asc' | 'desc';
+  filterChange?: 'all' | 'positive' | 'negative';
+} = {}): Promise<CurrentCryptoDocument[]> {
+  const query: FilterQuery<CurrentCryptoDocument> = {};
+  if (search) {
+    query.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { symbol: { $regex: search, $options: 'i' } },
+    ];
+  }
+  if (filterChange === 'positive') {
+    query.change24h = { $gt: 0 };
+  } else if (filterChange === 'negative') {
+    query.change24h = { $lt: 0 };
+  }
+  const sort: Record<string, SortOrder> = {};
+  sort[sortKey] = sortDir === 'asc' ? 1 : -1;
+  const result = await CurrentCrypto.find(query).sort(sort);
   return result;
 }
 
-export async function getHistoricalCrypto() {
+export async function getHistoricalCrypto(): Promise<Document[]> {
   const result = await HistoricalCrypto.find({}).sort({ timestamp: -1 });
   return result;
 }

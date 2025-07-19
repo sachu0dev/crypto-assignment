@@ -15,7 +15,7 @@ mongoose
   .connect(process.env.MONGODB_URI!, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-  } as any)
+  } as Parameters<typeof mongoose.connect>[1])
   .then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
@@ -35,16 +35,19 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // API Routes
-app.use('/api/crypto', cryptoRouter);
+app.get('/ping', (req, res) => {
+  res.send('working');
+});
+app.use('/v1/crypto', cryptoRouter);
 
 // Error handling middleware
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use(
   (
     err: Error & { status?: number },
     req: express.Request,
     res: express.Response,
-    next: express.NextFunction,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _next: express.NextFunction,
   ) => {
     console.error(err);
     res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });

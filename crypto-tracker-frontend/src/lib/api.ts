@@ -7,8 +7,24 @@ export const api = axios.create({
   timeout: 10000,
 });
 
-export async function fetchCurrentCrypto() {
-  const { data } = await api.get('/crypto/current');
+export async function fetchCurrentCrypto({
+  search = '',
+  sortKey = 'marketCap',
+  sortDir = 'desc',
+  filterChange = 'all',
+}: {
+  search?: string;
+  sortKey?: string;
+  sortDir?: 'asc' | 'desc';
+  filterChange?: 'all' | 'positive' | 'negative';
+} = {}) {
+  const params = {
+    search,
+    sortKey,
+    sortDir,
+    filterChange,
+  };
+  const { data } = await api.get('/crypto/current', { params });
   return data;
 }
 
